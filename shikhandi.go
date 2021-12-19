@@ -166,7 +166,7 @@ func getSpanKind(s string) trace.SpanKind {
 	case "server":
 		return trace.SpanKindServer
 	default:
-		return trace.SpanKindUnspecified
+		return trace.SpanKindInternal
 	}
 }
 

@@ -200,7 +200,7 @@ func emitTrace(serviceName string, routeName string, ctx context.Context) {
 				log.Printf("Started new trace: %s\n", span.SpanContext().TraceID())
 			}
 			// set unique instance identifier
-			n := inRange(0, len(s.Instances)-1)
+			n := inRange(0, len(s.Instances))
 			span.SetAttributes(attribute.String("service.instance.id", s.Instances[n]))
 			// pick an attribute set and apply
 			setAttributesForSpan(&span, &s.AttributeSets)

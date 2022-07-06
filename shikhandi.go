@@ -262,10 +262,12 @@ func main() {
 	if err := k.Load(file.Provider(tFile), json.Parser()); err != nil {
 		log.Fatalf("error loading topology file: %v", err)
 	}
+
 	var rootRoutes []RootRoute
 	k.Unmarshal("topology", &t)
 	k.Unmarshal("rootRoutes", &rootRoutes)
 	stp = make(map[string]trace.Tracer)
+
 	for _, service := range t.Services {
 		ctx := context.Background()
 		resource, err := resource.New(ctx,
@@ -286,6 +288,7 @@ func main() {
 			handleErr(provider.Shutdown(ctx), "failed to shutdown tracer provider")
 		}()
 	}
+
 	quit := make(chan bool)
 	exit := make(chan os.Signal, 1)
 	signal.Notify(exit, os.Interrupt)

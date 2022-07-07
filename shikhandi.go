@@ -253,11 +253,13 @@ func main() {
 	f.String("topologyFile", "", "File describing the anatomy")
 	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
 	f.Int64("flushIntervalMillis", 5000, "How often to flush traces")
+	f.String("serviceNamespace", "shikandhi", "Set OtelCollector resource attribute: service.namespace")
 	f.Parse(os.Args[1:])
 
 	tFile, _ := f.GetString("topologyFile")
 	collectorUrl, _ := f.GetString("collectorUrl")
 	flushIntervalMillis, _ := f.GetInt64("flushIntervalMillis")
+	serviceNamespace, _ := f.GetString("serviceNamespace")
 
 	if err := k.Load(file.Provider(tFile), json.Parser()); err != nil {
 		log.Fatalf("error loading topology file: %v", err)
@@ -271,7 +273,10 @@ func main() {
 	for _, service := range t.Services {
 		ctx := context.Background()
 		resource, err := resource.New(ctx,
-			resource.WithAttributes(attribute.String("service.name", service.ServiceName)),
+			resource.WithAttributes(
+				attribute.String("service.namespace", serviceNamespace),
+				attribute.String("service.name", service.ServiceName),
+			),
 		)
 		handleErr(err, "failed to create resource")
 		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithInsecure(), grpc.WithBlock())

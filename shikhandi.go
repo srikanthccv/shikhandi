@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net/http"
+	_ "net/http/pprof" // http profiler
 	"os"
 	"os/signal"
 	"strings"
@@ -242,6 +244,17 @@ func generate(rootRoute RootRoute, quit <-chan bool) {
 	}
 }
 
+func startPprofServer(pprofAddress string) {
+	go func() {
+		log.Println("Starting pprof server ", pprofAddress)
+
+		err := http.ListenAndServe(pprofAddress, nil)
+		if err != nil {
+			log.Fatalf("could not start pprof server: %v", err)
+		}
+	}()
+}
+
 func main() {
 	// Command line args
 	f := flag.NewFlagSet("config", flag.ExitOnError)
@@ -254,16 +267,20 @@ func main() {
 	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
 	f.Int64("flushIntervalMillis", 5000, "How often to flush traces")
 	f.String("serviceNamespace", "shikandhi", "Set OtelCollector resource attribute: service.namespace")
+	f.String("pprofAddress", "0.0.0.0:6060", "Address of pprof server")
 	f.Parse(os.Args[1:])
 
 	tFile, _ := f.GetString("topologyFile")
 	collectorUrl, _ := f.GetString("collectorUrl")
 	flushIntervalMillis, _ := f.GetInt64("flushIntervalMillis")
 	serviceNamespace, _ := f.GetString("serviceNamespace")
+	pprofAddress, _ := f.GetString("pprofAddress")
 
 	if err := k.Load(file.Provider(tFile), json.Parser()); err != nil {
 		log.Fatalf("error loading topology file: %v", err)
 	}
+
+	startPprofServer(pprofAddress)
 
 	var rootRoutes []RootRoute
 	k.Unmarshal("topology", &t)

@@ -246,12 +246,14 @@ func generate(rootRoute RootRoute, quit <-chan bool) {
 
 func startPprofServer(pprofAddress string) {
 	go func() {
-		log.Println("Starting pprof server ", pprofAddress)
+		log.Println("Starting pprof server", pprofAddress)
 
 		err := http.ListenAndServe(pprofAddress, nil)
 		if err != nil {
 			log.Fatalf("could not start pprof server: %v", err)
 		}
+
+		log.Println("pprof server started", pprofAddress)
 	}()
 }
 
@@ -265,14 +267,16 @@ func main() {
 
 	f.String("topologyFile", "", "File describing the anatomy")
 	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
-	f.Int64("flushIntervalMillis", 5000, "How often to flush traces")
+	f.Int64("flushIntervalSeconds", 10, "How often to flush traces (in seconds)")
+	f.Int64("maxBatchSize", 1000, "How often to flush traces")
 	f.String("serviceNamespace", "shikandhi", "Set OtelCollector resource attribute: service.namespace")
 	f.String("pprofAddress", "0.0.0.0:6060", "Address of pprof server")
 	f.Parse(os.Args[1:])
 
 	tFile, _ := f.GetString("topologyFile")
 	collectorUrl, _ := f.GetString("collectorUrl")
-	flushIntervalMillis, _ := f.GetInt64("flushIntervalMillis")
+	flushIntervalSeconds, _ := f.GetInt64("flushIntervalSeconds")
+	maxBatchSize, _ := f.GetInt("maxBatchSize")
 	serviceNamespace, _ := f.GetString("serviceNamespace")
 	pprofAddress, _ := f.GetString("pprofAddress")
 
@@ -303,7 +307,11 @@ func main() {
 
 		provider := sdktrace.NewTracerProvider(
 			sdktrace.WithResource(resource),
-			sdktrace.WithBatcher(traceExporter, sdktrace.WithBatchTimeout(time.Duration(flushIntervalMillis))),
+			sdktrace.WithBatcher(
+				traceExporter,
+				sdktrace.WithBatchTimeout(time.Duration(flushIntervalSeconds)*time.Second),
+				sdktrace.WithMaxExportBatchSize(maxBatchSize),
+			),
 		)
 		stp[service.ServiceName] = provider.Tracer("load-generator")
 		defer func() {

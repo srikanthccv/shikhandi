@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net/http"
+	_ "net/http/pprof" // http profiler
 	"os"
 	"os/signal"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type RootRoute struct {
@@ -242,6 +245,19 @@ func generate(rootRoute RootRoute, quit <-chan bool) {
 	}
 }
 
+func startPprofServer(pprofAddress string) {
+	go func() {
+		log.Println("Starting pprof server", pprofAddress)
+
+		err := http.ListenAndServe(pprofAddress, nil)
+		if err != nil {
+			log.Fatalf("could not start pprof server: %v", err)
+		}
+
+		log.Println("pprof server started", pprofAddress)
+	}()
+}
+
 func main() {
 	// Command line args
 	f := flag.NewFlagSet("config", flag.ExitOnError)
@@ -252,18 +268,24 @@ func main() {
 
 	f.String("topologyFile", "", "File describing the anatomy")
 	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
-	f.Int64("flushIntervalMillis", 5000, "How often to flush traces")
+	f.Int64("flushIntervalSeconds", 10, "How often to flush traces (in seconds)")
+	f.Int64("maxBatchSize", 1000, "How often to flush traces")
 	f.String("serviceNamespace", "shikandhi", "Set OtelCollector resource attribute: service.namespace")
+	f.String("pprofAddress", "0.0.0.0:6060", "Address of pprof server")
 	f.Parse(os.Args[1:])
 
 	tFile, _ := f.GetString("topologyFile")
 	collectorUrl, _ := f.GetString("collectorUrl")
-	flushIntervalMillis, _ := f.GetInt64("flushIntervalMillis")
+	flushIntervalSeconds, _ := f.GetInt64("flushIntervalSeconds")
+	maxBatchSize, _ := f.GetInt("maxBatchSize")
 	serviceNamespace, _ := f.GetString("serviceNamespace")
+	pprofAddress, _ := f.GetString("pprofAddress")
 
 	if err := k.Load(file.Provider(tFile), json.Parser()); err != nil {
 		log.Fatalf("error loading topology file: %v", err)
 	}
+
+	startPprofServer(pprofAddress)
 
 	var rootRoutes []RootRoute
 	k.Unmarshal("topology", &t)
@@ -279,14 +301,18 @@ func main() {
 			),
 		)
 		handleErr(err, "failed to create resource")
-		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 		handleErr(err, "failed to create gRPC connection to collector")
 		traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 		handleErr(err, "failed to create trace exporter")
 
 		provider := sdktrace.NewTracerProvider(
 			sdktrace.WithResource(resource),
-			sdktrace.WithBatcher(traceExporter, sdktrace.WithBatchTimeout(time.Duration(flushIntervalMillis))),
+			sdktrace.WithBatcher(
+				traceExporter,
+				sdktrace.WithBatchTimeout(time.Duration(flushIntervalSeconds)*time.Second),
+				sdktrace.WithMaxExportBatchSize(maxBatchSize),
+			),
 		)
 		stp[service.ServiceName] = provider.Tracer("load-generator")
 		defer func() {

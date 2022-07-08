@@ -23,6 +23,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type RootRoute struct {
@@ -300,7 +301,7 @@ func main() {
 			),
 		)
 		handleErr(err, "failed to create resource")
-		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 		handleErr(err, "failed to create gRPC connection to collector")
 		traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 		handleErr(err, "failed to create trace exporter")

@@ -13,17 +13,19 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/providers/file"
 	flag "github.com/spf13/pflag"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type RootRoute struct {
@@ -68,6 +70,26 @@ type ServiceRoute struct {
 	EventSets        []EventSet        `koanf:"eventSets"`
 	SpanKind         string            `koanf:"spanKind"`
 	MaxLatencyMillis int               `koanf:"maxLatencyMillis"`
+}
+
+type CustomSampler struct{}
+
+func (cs CustomSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	r := inRange(1, 4)
+	decision := sdktrace.RecordAndSample
+	if r%3 == 0 {
+		decision = sdktrace.RecordOnly
+		log.Printf("Dropping span: %s for trace %s\n", trace.SpanContextFromContext(p.ParentContext).SpanID(), trace.SpanContextFromContext(p.ParentContext).TraceID())
+	}
+	return sdktrace.SamplingResult{
+		Decision:   decision,
+		Attributes: p.Attributes,
+		Tracestate: trace.SpanContextFromContext(p.ParentContext).TraceState(),
+	}
+}
+
+func (cs CustomSampler) Description() string {
+	return "CustomSampler"
 }
 
 var k = koanf.New(".")
@@ -270,9 +292,12 @@ func main() {
 	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
 	f.Int64("flushIntervalSeconds", 10, "How often to flush traces (in seconds)")
 	f.Int64("maxBatchSize", 1000, "How often to flush traces")
-	f.String("serviceNamespace", "shikandhi", "Set OtelCollector resource attribute: service.namespace")
+	f.String("serviceNamespace", "shikandi", "Set OtelCollector resource attribute: service.namespace")
 	f.String("pprofAddress", "0.0.0.0:6060", "Address of pprof server")
-	f.Parse(os.Args[1:])
+	err := f.Parse(os.Args[1:])
+	if err != nil {
+		log.Fatalf("Failed to parse args %v", err)
+	}
 
 	tFile, _ := f.GetString("topologyFile")
 	collectorUrl, _ := f.GetString("collectorUrl")
@@ -288,13 +313,19 @@ func main() {
 	startPprofServer(pprofAddress)
 
 	var rootRoutes []RootRoute
-	k.Unmarshal("topology", &t)
-	k.Unmarshal("rootRoutes", &rootRoutes)
+	err = k.Unmarshal("topology", &t)
+	if err != nil {
+		log.Fatalf("Failed to Unmarshal topology %v", err)
+	}
+	err = k.Unmarshal("rootRoutes", &rootRoutes)
+	if err != nil {
+		log.Fatalf("Failed to Unmarshal rootRoutes %v", err)
+	}
 	stp = make(map[string]trace.Tracer)
 
 	for _, service := range t.Services {
 		ctx := context.Background()
-		resource, err := resource.New(ctx,
+		serviceResource, err := resource.New(ctx,
 			resource.WithAttributes(
 				attribute.String("service.namespace", serviceNamespace),
 				attribute.String("service.name", service.ServiceName),
@@ -307,7 +338,8 @@ func main() {
 		handleErr(err, "failed to create trace exporter")
 
 		provider := sdktrace.NewTracerProvider(
-			sdktrace.WithResource(resource),
+			sdktrace.WithSampler(CustomSampler{}),
+			sdktrace.WithResource(serviceResource),
 			sdktrace.WithBatcher(
 				traceExporter,
 				sdktrace.WithBatchTimeout(time.Duration(flushIntervalSeconds)*time.Second),

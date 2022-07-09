@@ -1,4 +1,4 @@
-module github.com/lonewolf3739/shikhandi
+module github.com/srikanthccv/shikhandi
 
 go 1.17
 

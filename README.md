@@ -6,10 +6,19 @@ shikhandi is a tiny load generator for opentelemetry and heavily inspired by thi
 Usage: shikhandi <options>
 
 Options:
-    --collectorUrl string       OpenTelemetry collector URL (default "0.0.0.0:4317")
-    --flushIntervalMillis int   How often to flush traces (default 5000)
-    --topologyFile string       File describing the anatomy
+    --topologyFile      string      File describing the anatomy
+    --serviceNamespace  string      Set OtelCollector resource attribute: service.namespace
+    --pprofAddress      string      Address of pprof server
 ```
+
+For Processor/Exporter use the same settings supported OpenTelemetry
+
+A secure gRPC connection for OTLP exporter would use something like following.
+```
+OTEL_EXPORTER_OTLP_ENDPOINT=https://127.0.0.1:4317
+OTEL_EXPORTER_OTLP_CERTIFICATE=/path/to/ca/cert.pem
+```
+And seeting scheme to `http` instructs exporter to use insecure connection.
 
 ## Build the binary
 

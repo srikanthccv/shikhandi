@@ -13,8 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/providers/file"
@@ -25,7 +23,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
-	"google.golang.org/grpc"
 )
 
 type RootRoute struct {
@@ -289,9 +286,6 @@ func main() {
 	}
 
 	f.String("topologyFile", "", "File describing the anatomy")
-	f.String("collectorUrl", "0.0.0.0:4317", "OpenTelemetry collector URL")
-	f.Int64("flushIntervalSeconds", 10, "How often to flush traces (in seconds)")
-	f.Int64("maxBatchSize", 1000, "How often to flush traces")
 	f.String("serviceNamespace", "shikandi", "Set OtelCollector resource attribute: service.namespace")
 	f.String("pprofAddress", "0.0.0.0:6060", "Address of pprof server")
 	err := f.Parse(os.Args[1:])
@@ -300,9 +294,6 @@ func main() {
 	}
 
 	tFile, _ := f.GetString("topologyFile")
-	collectorUrl, _ := f.GetString("collectorUrl")
-	flushIntervalSeconds, _ := f.GetInt64("flushIntervalSeconds")
-	maxBatchSize, _ := f.GetInt("maxBatchSize")
 	serviceNamespace, _ := f.GetString("serviceNamespace")
 	pprofAddress, _ := f.GetString("pprofAddress")
 
@@ -323,6 +314,7 @@ func main() {
 	}
 	stp = make(map[string]trace.Tracer)
 
+	log.Println("Starting pipeline, this may take a while...")
 	for _, service := range t.Services {
 		ctx := context.Background()
 		serviceResource, err := resource.New(ctx,
@@ -332,25 +324,20 @@ func main() {
 			),
 		)
 		handleErr(err, "failed to create resource")
-		conn, err := grpc.DialContext(ctx, collectorUrl, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
-		handleErr(err, "failed to create gRPC connection to collector")
-		traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
+		traceExporter, err := otlptracegrpc.New(ctx)
 		handleErr(err, "failed to create trace exporter")
 
 		provider := sdktrace.NewTracerProvider(
 			sdktrace.WithSampler(CustomSampler{}),
 			sdktrace.WithResource(serviceResource),
-			sdktrace.WithBatcher(
-				traceExporter,
-				sdktrace.WithBatchTimeout(time.Duration(flushIntervalSeconds)*time.Second),
-				sdktrace.WithMaxExportBatchSize(maxBatchSize),
-			),
+			sdktrace.WithBatcher(traceExporter),
 		)
 		stp[service.ServiceName] = provider.Tracer("load-generator")
 		defer func() {
 			handleErr(provider.Shutdown(ctx), "failed to shutdown tracer provider")
 		}()
 	}
+	fmt.Print("Starting load generator\n")
 
 	quit := make(chan bool)
 	exit := make(chan os.Signal, 1)
